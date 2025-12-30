@@ -1,0 +1,152 @@
+.update_interval: &update_interval 10min
+# .update_interval: &update_interval 2s # test
+
+esp32:
+  board: az-delivery-devkit-v4
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  password: ""
+
+ota:
+  - platform: esphome
+    password: ""
+
+captive_portal:
+
+external_components:
+  - source:
+      type: git
+      path: https://github.com/mguzzina/esphome_components.git
+      ref: main
+    components [ output_array ]
+
+# Temperature sensor ds18b20 requires one_wire
+one_wire:
+  - platform: gpio
+    pin: GPIO23
+
+sensor:
+  - platform: dallas_temp
+    id: ds18b20
+    name: temperature
+    update_interval: *update_interval
+  # The rotary encoder can be used to change the set temperature
+  - platform: rotary_encoder
+    restore_mode: ALWAYS_ZERO
+    name: "Rotary Encoder"
+    pin_a: GPIO39
+    pin_b: GPIO36
+    on_clockwise:
+      - lambda: |
+          auto& temp = id(climate_controller).target_temperature;
+          const auto& traits = id(climate_controller).get_traits();
+
+          auto& mode = id(climate_controller).mode;
+          if (CLIMATE_MODE_OFF == mode) {
+            mode = CLIMATE_MODE_HEAT;
+            return;
+          }
+
+          auto intTemp = static_cast<size_t>(temp * 10.F);
+          intTemp += 1;
+
+          temp = std::clamp(static_cast<float>(intTemp) / 10.F, traits.get_visual_min_temperature(), traits.get_visual_max_temperature());
+      - logger.log:
+          format: "Temp: %f"
+          args: ["id(climate_controller).target_temperature"]
+    on_anticlockwise:
+      - lambda: |
+          auto& temp = id(climate_controller).target_temperature;
+          const auto& traits = id(climate_controller).get_traits();
+
+          if (traits.get_visual_min_temperature() == temp) {
+            id(climate_controller).mode = CLIMATE_MODE_OFF;
+            return;
+          }
+
+          auto intTemp = static_cast<size_t>(temp * 10.F);
+          intTemp -= 1;
+
+          temp = std::clamp(static_cast<float>(intTemp) / 10.F, traits.get_visual_min_temperature(), traits.get_visual_max_temperature());
+      - logger.log:
+          format: "Temp: %f"
+          args: ["id(climate_controller).target_temperature"]
+
+# This handles the relay switching to choose the fan coil speed
+output:
+  - platform: sigma_delta_output
+    update_interval: *update_interval
+    id: sigma_delta
+  - platform: output_array
+    id: relay_output
+    output_id: sigma_delta
+    pins:
+      - GPIO27
+      - GPIO26
+      - GPIO25
+
+# This actually does the work
+climate:
+  - platform: pid
+    name: "Fan Coil"
+    id: climate_controller
+    sensor: ds18b20
+    default_target_temperature: 21°C
+    heat_output: relay_output
+    control_parameters:
+      kp: 0.049460
+      ki: 0.000487
+      kd: 1.256301
+      output_averaging_samples: 5 # smooth the output over 5 samples
+      derivative_averaging_samples: 5 # smooth the derivative value over 10 samples
+    visual:
+      min_temperature: 18
+      max_temperature: 25
+      temperature_step: 0.1
+
+# The display only turns on briefly when the set temperature changes, since it is pretty bright.
+display:
+  - platform: tm1637
+    id: tm1637_display
+    clk_pin: GPIO32
+    dio_pin: GPIO33
+    inverted: false
+    length: 4
+    update_interval: 100ms
+    lambda: |-
+      static int iterations = 0;
+
+      const auto* climate = id(climate_controller);
+      static float set_temp = climate->target_temperature;
+
+      if (climate->target_temperature != set_temp) {
+        iterations = 0;
+      } else if (iterations >= 20) {
+        return;
+      }
+
+      auto intTemp = static_cast<size_t>(std::round(set_temp * 10));
+      set_temp = climate->target_temperature;
+      ++iterations;
+
+      if (CLIMATE_MODE_OFF == climate->mode) {
+        it.print(" OFF");
+        return;
+      }
+
+      char temp[6] = "00.0C";
+      temp[3] = '0' + (intTemp % 10);
+      intTemp /= 10;
+
+      temp[1] = '0' + (intTemp % 10);
+      intTemp /= 10;
+
+      temp[0] = '0' + (intTemp % 10);
+
+      it.print(temp);
