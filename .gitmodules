@@ -1,0 +1,3 @@
+[submodule "esphome"]
+	path = esphome
+	url = ../../esphome/esphome.git
