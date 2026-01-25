@@ -143,3 +143,5 @@ sdkconfig.*
 /managed_components
 
 api-docs/
+
+secrets.yaml

@@ -62,14 +62,17 @@ class GPIOWrapper : public GPIOPin {
     }
   }
 
-  std::string dump_summary() const override {
+  size_t dump_summary(char *buffer, size_t len) const override {
     assert(!this->pins_.empty());
-    std::string summary = "[" + this->pins_.front()->dump_summary();
-    for (size_t i = 1; i < this->pins_.size(); ++i) {
-      summary += ", " + this->pins_[i]->dump_summary();
+
+    size_t totalLength = snprintf(buffer, len, "[");
+    for (size_t i = 0; i < this->pins_.size(); ++i) {
+      if (i > 0) {
+        totalLength += snprintf(buffer, len, ", ");
+      }
+      totalLength += this->pins_[i]->dump_summary(buffer, len);
     }
-    summary += ']';
-    return summary;
+    return totalLength + snprintf(buffer, len, "]");
   }
 
   void set_pins(const std::vector<GPIOPin *> &pins) {

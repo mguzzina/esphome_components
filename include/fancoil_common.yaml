@@ -11,7 +11,8 @@ logger:
 
 # Enable Home Assistant API
 api:
-  password: ""
+  encryption:
+    key: !secret encryption_key
 
 ota:
   - platform: esphome
@@ -24,7 +25,7 @@ external_components:
       type: git
       path: https://github.com/mguzzina/esphome_components.git
       ref: main
-    components [ output_array ]
+    components: [output_array]
 
 # Temperature sensor ds18b20 requires one_wire
 one_wire:
